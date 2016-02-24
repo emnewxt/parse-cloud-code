@@ -1,154 +1,211 @@
-function promiseResponse(promise, response) {
-    promise.then(function(o) {
-        response.success(o);
-    }, function(error) {
-        response.error(error);
-    })
-}
+// Use Parse.Cloud.define to define as many cloud functions as you want.
+// For example:
 
-/**
- * @param {Function(request, response)} func
- */
-function defineParseCloud(func) {
-    Parse.Cloud.define(func.name, func);
-}
-
-function s4() {
-      return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
-}
-
-function guid() {
-      return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
-                   s4() + '-' + s4() + s4() + s4();
-}
-
-function guid20() {
-      return s4() + s4() + s4() + s4() + s4();
-}
-
-/**
- * Returns twitchUser
- *
- * @param {String} token
- * @returns {Promise<TwitchUser>} twitchUser
- * @see https://github.com/justintv/twitch-api
- * @see https://github.com/justintv/Twitch-API/blob/master/authentication.md#scope
- */
-function getTwitchUser(accessToken) {
-    return Parse.Cloud.httpRequest({
-        url: "https://api.twitch.tv/kraken/user",
-           params: {
-               oauth_token: accessToken
-           }
-    }).then(function(httpResponse) {
-        return JSON.parse(httpResponse.text);
+/*
+function connectAsAdmin(callback)
+{
+  Parse.initialize("w9aD3lAJFPcKJgY6uM5iobQm1YaWaEBLySvWTc5m", "GiyuU6qqcFo5GuvjCI4npVSj9ZlDPFvgbwArQxqE");
+  Parse.User.logIn("MakeUpCentral", "0158186091", { 
+    success: function(user) {console.log(user); console.log("OK"); callback();},
+    error: function(error) {console.log(error);console.log("ERROR");}
     });
 }
+*/
 
-/**
- * Returns email
- *
- * @param {String} token
- * @returns {Promise<String>} email
- */
-function getEmail(accessToken) {
-    return getTwitchUser(accessToken).then(function(twitchUser) {
-        return twitchUser.email; // { email: "abc@example.com" }
+
+function saveUpdatedAt() 
+{
+ // connectAsAdmin(function()
+ // {
+    var query = new Parse.Query(Parse.Object.extend("GlobalUpdatedAt"));
+    query.ascending("updatedAt").find(
+      {
+        success: function (results) { destroyGlobalUpdatedAtObjects(results, function() { createGlobalUpdatedAtObject()});},
+        error: function (error) { createGlobalUpdatedAtObject();}
+  });
+  //});
+};
+
+
+function destroyGlobalUpdatedAtObjects(objects, callback)
+{
+  if (objects && objects.length)
+  {
+    var taskCount = objects.length;
+    objects.forEach(function(object) 
+    {
+        object.destroy({
+        success: function (object) {taskCount--; if (taskCount < 1) {callback();} },
+        error: function (myObject, error) {taskCount--; if (taskCount < 1) {callback();} }
+      });
     });
+  }
+  else {callback();}
 }
 
-/**
- * Returns the session token of available parse user via twitch access token within `request.params.accessToken`.
- *
- * <pre>
- * {access_token: "", firebase_id: "", provider: ""} // from oauth.io
- * </pre>
- *
- * @param {Object} request Require request.params.accessToken
- * @param {Object} response
- * @returns {String} sessionToken
- */
-function signInWithTwitch(request, response) {
-    promiseResponse(signInWithTwitchPromise(request.user, request.params.access_token, request.params.expires_time), response);
+
+function createGlobalUpdatedAtObject()
+{
+  var GlobalUpdatedAtClass = Parse.Object.extend("GlobalUpdatedAt");
+  var globalUpdatedAtObject = new GlobalUpdatedAtClass()
+  globalUpdatedAtObject.set("globalUpdatedAt", new Date())
+  globalUpdatedAtObject.save(null, 
+  {
+  success: function(object) { alert('New object created with objectId: ' + object.id);},
+  error: function(object, error) { alert('Failed to create new object, with error code: ' + error.message);}
+  });
 }
 
-/**
- * Returns the session token of available parse user via twitch access token.
- *
- * @param {Parse.User} user
- * @param {String} accessToken
- * @param {Number} expiresTime
- * @returns {Promise<String>} sessionToken
- */
-function signInWithTwitchPromise(user, accessToken, expiresTime) {
-    Parse.Cloud.useMasterKey();
 
-    var userPromise;
+Parse.Cloud.afterSave("Categories", function(request) 
+{
+  saveUpdatedAt();
+});
 
-    if (user) { // login
-        userPromise = Parse.Promise.as(user);
-    } else { // not login
-        if (!accessToken) {
-            return Parse.Promise.error("Require accessToken parameter");
-        }
+Parse.Cloud.afterDelete("Categories", function(request)
+{
+  saveUpdatedAt();
+});
 
-        userPromise = getTwitchUser(accessToken).then(function(twitchUser) {
-            if (!twitchUser) return Parse.Promise.error("Invalid token");
-            //console.log(twitchUser.email);
 
-            var userQuery = new Parse.Query(Parse.User);
-            userQuery.equalTo("email", twitchUser.email);
-            userQuery.equalTo("username", twitchUser.name);
-            return userQuery.first().then(function(user) {
-                if (user) {
-                    //console.log("found:user:" + JSON.stringify(user.toJSON()));
-                    //console.log("found:token:1:" + user.getSessionToken());
-                    //console.log("found:token:2:" + user._sessionToken);
-                    //console.log("found:token:3:" + user.sessionToken);
-                    return user;
-                }
+Parse.Cloud.afterSave("CategoriesCountry", function(request)
+{
+  saveUpdatedAt();
+});
 
-                var newUser = new Parse.User();
-                var username = twitchUser.name;
-                var password = "twitch" + guid20();
+Parse.Cloud.afterDelete("CategoriesCountry", function(request)
+{
+  saveUpdatedAt();
+});
 
-                newUser.setUsername(username); // assert username not duplicated
-                newUser.setPassword(password);
-                newUser.setEmail(twitchUser.email);
 
-                var attrs = {
-                    // exception: {"code":251,"message":"custom credential verification for auth service twitch failed"}
-                    //"authData": {
-                    //    "twitch": {
-                    //        "id": twitchUser._id,
-                    //        "access_token": accessToken,
-                    //        "expires_time": expiresTime
-                    //    }
-                    //},
-                    uid: twitchUser._id.toString()
-                };
-                console.log("signUp");
-                return newUser.signUp(attrs);
-            });
-        });
-    }
+Parse.Cloud.afterSave("Countries", function(request)
+{
+  saveUpdatedAt();
+});
 
-    // ref. http://stackoverflow.com/questions/29489008/parse-why-does-user-getsessiontoken-return-undefined
-    var password = "twitch" + guid20(); // FIXME it's necessary for signUp?
-    return userPromise.then(function(user) {
-        if (!user) return Parse.Promise.error("Twitch user not found");
+Parse.Cloud.afterDelete("Countries", function(request)
+{
+  saveUpdatedAt();
+});
 
-        user.set("password", password);
-        return user.save();
-    }).then(function(user){
-        return Parse.User.logIn(user.get("username"), password);
-    }).then(function(user){
-        //console.log("final:user:" + JSON.stringify(user.toJSON()));
-        //console.log("final:token:1:" + user.getSessionToken());
-        //console.log("final:token:2:" + user._sessionToken);
-        //console.log("final:token:3:" + user.sessionToken);
-        return user.getSessionToken();
-    });
-}
 
-defineParseCloud(signInWithTwitch);
+Parse.Cloud.afterSave("CountriesFacecharts", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("CountriesFacecharts", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("CountriesVideos", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("CountriesVideos", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("FacechartProducts", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("FacechartProducts", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("Facecharts", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("Facecharts", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("Faceparts", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("Faceparts", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("Languages", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("Languages", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("Products", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("Products", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("Status", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("Status", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("Translations", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("Translations", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("Videos", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("Videos", function(request)
+{
+  saveUpdatedAt();
+});
+
+
+Parse.Cloud.afterSave("VideosCategories", function(request)
+{
+  saveUpdatedAt();
+});
+
+Parse.Cloud.afterDelete("VideosCategories", function(request)
+{
+  saveUpdatedAt();
+});
